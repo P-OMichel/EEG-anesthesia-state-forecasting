@@ -4,9 +4,23 @@ from scipy import signal
 
 
 class EEGProcessor:
-    """Handles VitalDB EEG extraction, spectral analysis, and state estimation."""
+    """Handles VitalDB EEG & hypnotic extraction, spectral analysis, and state estimation."""
 
     PREFERRED_EEG_KEYS = ["BIS__EEG1_WAV_val", "BIS__EEG2_WAV_val"]
+
+    PROPOFOL_TRACKS = {
+        "Orchestra__PPF20_CE": "Propofol Ce (µg/mL)",
+        "Orchestra__PPF20_CP": "Propofol Cp (µg/mL)",
+        "Orchestra__PPF_CE": "Propofol Ce (µg/mL)",
+        "Orchestra__PPF_CP": "Propofol Cp (µg/mL)",
+    }
+
+    SEVO_TRACKS = {
+        "Primus__EXP_SEVO": "Sevoflurane Exp (%)",
+        "Solar8000__ETSEVO": "Sevoflurane ET (%)",
+        "Primus__INSP_SEVO": "Sevoflurane Insp (%)",
+        "Solar8000__INSEVO": "Sevoflurane Insp (%)",
+    }
 
     def __init__(self, fs: int = 128):
         self.fs = fs
@@ -29,11 +43,9 @@ class EEGProcessor:
 
         if ext == ".npz":
             with np.load(file_path, allow_pickle=False) as data:
-                # 1. Check if it is an already-annotated file
                 if "eeg" in data.files:
                     return self._clean_nan(data["eeg"]), "annotated_eeg"
 
-                # 2. Check VitalDB exported EEG keys
                 for key in self.PREFERRED_EEG_KEYS:
                     if key in data.files:
                         return self._clean_nan(data[key]), key
@@ -44,6 +56,66 @@ class EEGProcessor:
                 )
 
         raise ValueError(f"Unsupported file format: {ext}")
+
+    def extract_hypnotics_from_file(self, file_path: str) -> tuple[list[dict], str]:
+        """
+        Scans a VitalDB .npz file for Propofol or Sevoflurane concentration tracks.
+        Returns:
+            tracks: list of dicts {'name': str, 'agent': str, 'time': np.ndarray, 'val': np.ndarray}
+            detected_agent: 'propofol' | 'sevoflurane' | 'mixed' | 'unknown'
+        """
+        tracks = []
+        if not file_path.lower().endswith(".npz") or not os.path.exists(file_path):
+            return tracks, "unknown"
+
+        has_propofol = False
+        has_sevo = False
+
+        with np.load(file_path, allow_pickle=False) as data:
+            file_keys = set(data.files)
+
+            for base_key, display_name in self.PROPOFOL_TRACKS.items():
+                val_key = f"{base_key}_val"
+                time_key = f"{base_key}_time"
+                if val_key in file_keys and time_key in file_keys:
+                    vals = np.asarray(data[val_key], dtype=np.float32)
+                    times = np.asarray(data[time_key], dtype=np.float32)
+                    valid = ~np.isnan(vals)
+                    if np.any(valid) and np.nanmax(vals[valid]) > 0.0:
+                        has_propofol = True
+                        tracks.append({
+                            "name": display_name,
+                            "agent": "propofol",
+                            "time": times[valid],
+                            "val": vals[valid],
+                        })
+
+            for base_key, display_name in self.SEVO_TRACKS.items():
+                val_key = f"{base_key}_val"
+                time_key = f"{base_key}_time"
+                if val_key in file_keys and time_key in file_keys:
+                    vals = np.asarray(data[val_key], dtype=np.float32)
+                    times = np.asarray(data[time_key], dtype=np.float32)
+                    valid = ~np.isnan(vals)
+                    if np.any(valid) and np.nanmax(vals[valid]) > 0.0:
+                        has_sevo = True
+                        tracks.append({
+                            "name": display_name,
+                            "agent": "sevoflurane",
+                            "time": times[valid],
+                            "val": vals[valid],
+                        })
+
+        if has_propofol and has_sevo:
+            detected_agent = "mixed"
+        elif has_propofol:
+            detected_agent = "propofol"
+        elif has_sevo:
+            detected_agent = "sevoflurane"
+        else:
+            detected_agent = "unknown"
+
+        return tracks, detected_agent
 
     @staticmethod
     def _clean_nan(arr: np.ndarray) -> np.ndarray:
@@ -66,10 +138,7 @@ class EEGProcessor:
     def compute_sliding_power(
         self, eeg: np.ndarray, win_sec: float = 30.0, step_sec: float = 10.0
     ):
-        """
-        Computes mean power over sliding windows of 30s taken every 10s.
-        Returns window center timestamps and power array.
-        """
+        """Computes mean power over sliding windows of 30s taken every 10s."""
         win_samples = int(win_sec * self.fs)
         step_samples = int(step_sec * self.fs)
 
@@ -92,7 +161,6 @@ class EEGProcessor:
         High power -> 20, Low power -> 0.
         Replace this method later with your custom algorithm.
         """
-        # Compute percentiles on non-zero power windows to ignore unplugged lead zeros
         valid_powers = powers[powers > 0]
         if len(valid_powers) == 0:
             return np.zeros(len(powers), dtype=np.int32)

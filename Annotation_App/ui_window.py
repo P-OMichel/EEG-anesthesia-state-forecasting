@@ -2,7 +2,7 @@ import os
 import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFileDialog, QGroupBox,
+    QPushButton, QLabel, QFileDialog, QGroupBox, QCheckBox,
     QMessageBox, QSplitter, QListWidget, QGraphicsRectItem
 )
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal
@@ -222,7 +222,7 @@ class EEGAnnotatorWindow(QMainWindow):
         self.store = store
 
         self.setWindowTitle("EEG Depth & Event Annotator (128 Hz) — VitalDB Dataset Tool")
-        self.resize(1480, 950)
+        self.resize(1480, 990)
 
         self.time_eeg: np.ndarray = np.array([])
         self.event_line_pairs = []
@@ -238,13 +238,22 @@ class EEGAnnotatorWindow(QMainWindow):
         main_layout.addWidget(splitter)
 
         # -------------------------------------------------------------
-        # LEFT: 5 Synchronized Plots Container
+        # LEFT: 6 Synchronized Plots Container (Compact Hypnotic Plot on Top)
         # -------------------------------------------------------------
         plots_container = QWidget()
         plots_layout = QVBoxLayout(plots_container)
         plots_layout.setContentsMargins(0, 0, 0, 0)
-        plots_layout.setSpacing(4)
+        plots_layout.setSpacing(3)
         splitter.addWidget(plots_container)
+
+        # Plot 0 (Compact Top Strip): Hypnotic Concentration (0 to 8)
+        self.p_hyp = pg.PlotWidget(title="Hypnotic Concentration (0–8: Propofol µg/mL or Sevoflurane %)")
+        self.p_hyp.setLabel("left", "Conc.")
+        self.p_hyp.setYRange(0, 8, padding=0.05)
+        self.p_hyp.getAxis("left").setTicks([[(0, "0"), (2, "2"), (4, "4"), (6, "6"), (8, "8")]])
+        self.p_hyp.showGrid(x=True, y=True, alpha=0.3)
+        self.p_hyp.addLegend(offset=(10, 5))
+        plots_layout.addWidget(self.p_hyp, stretch=1)
 
         # Plot 1: Raw EEG
         self.p_eeg = pg.PlotWidget(
@@ -256,8 +265,8 @@ class EEGAnnotatorWindow(QMainWindow):
         self.curve_eeg.setDownsampling(auto=True, method="peak")
         self.curve_eeg.setClipToView(True)
 
-        crop_pen = pg.mkPen("#4ec9b0", width=2.5)
-        crop_hover_pen = pg.mkPen("#80ffe5", width=3.5)
+        crop_pen = pg.mkPen("#ff4d4d", width=2.5)
+        crop_hover_pen = pg.mkPen("#ff8080", width=3.5)
 
         self.crop_start_line = pg.InfiniteLine(
             pos=0.0,
@@ -266,7 +275,7 @@ class EEGAnnotatorWindow(QMainWindow):
             pen=crop_pen,
             hoverPen=crop_hover_pen,
             label="Keep Start",
-            labelOpts={"position": 0.12, "color": "#4ec9b0", "movable": True},
+            labelOpts={"position": 0.12, "color": "#ff4d4d", "movable": True},
         )
         self.crop_end_line = pg.InfiniteLine(
             pos=0.0,
@@ -275,7 +284,7 @@ class EEGAnnotatorWindow(QMainWindow):
             pen=crop_pen,
             hoverPen=crop_hover_pen,
             label="Keep End",
-            labelOpts={"position": 0.12, "color": "#4ec9b0", "movable": True},
+            labelOpts={"position": 0.12, "color": "#ff4d4d", "movable": True},
         )
         self.crop_start_line.setZValue(15)
         self.crop_end_line.setZValue(15)
@@ -336,8 +345,8 @@ class EEGAnnotatorWindow(QMainWindow):
         self.p_cond.valuesChanged.connect(self._on_condition_points_dragged)
         plots_layout.addWidget(self.p_cond, stretch=2)
 
-        # Synchronize X-axes across all 5 plots
-        for plot in [self.p_spec, self.p_power, self.p_state, self.p_cond]:
+        # Synchronize X-axes across all 6 plots
+        for plot in [self.p_hyp, self.p_spec, self.p_power, self.p_state, self.p_cond]:
             plot.setXLink(self.p_eeg)
 
         # -------------------------------------------------------------
@@ -348,8 +357,8 @@ class EEGAnnotatorWindow(QMainWindow):
         ctrl_layout = QVBoxLayout(control_panel)
         splitter.addWidget(control_panel)
 
-        # Group 1: File & Sample Identification
-        grp_file = QGroupBox("1. Dataset & Sample Identification")
+        # Group 1: File, Sample ID & Auto-Detected Hypnotic Agent
+        grp_file = QGroupBox("1. Dataset, Sample & Hypnotic Agent")
         lay_file = QVBoxLayout(grp_file)
 
         self.lbl_sample_id = QLabel("Sample ID: No file loaded")
@@ -361,6 +370,10 @@ class EEGAnnotatorWindow(QMainWindow):
         self.lbl_file_status.setWordWrap(True)
         self.lbl_file_status.setStyleSheet("color: #aaaaaa;")
         lay_file.addWidget(self.lbl_file_status)
+
+        self.lbl_hypnotic_agent = QLabel("Hypnotic Agent (auto): —")
+        self.lbl_hypnotic_agent.setStyleSheet("font-weight: bold; color: #4fc1ff;")
+        lay_file.addWidget(self.lbl_hypnotic_agent)
 
         btn_load = QPushButton("📂 Open Recording (.npz / .npy)")
         btn_load.setStyleSheet("font-weight: bold; padding: 6px;")
@@ -417,7 +430,7 @@ class EEGAnnotatorWindow(QMainWindow):
         lay_events.addLayout(btn_row_ev)
 
         self.list_events = QListWidget()
-        self.list_events.setMaximumHeight(120)
+        self.list_events.setMaximumHeight(95)
         lay_events.addWidget(self.list_events)
 
         btn_del_event = QPushButton("🗑 Remove Selected Event")
@@ -425,9 +438,25 @@ class EEGAnnotatorWindow(QMainWindow):
         lay_events.addWidget(btn_del_event)
         ctrl_layout.addWidget(grp_events)
 
-        # Group 5: Manual Save
-        grp_save = QGroupBox("5. Manual Validation & Save")
+        # Group 5: Selective Save Options & Validation
+        grp_save = QGroupBox("5. Selective Save & Validation")
         lay_save = QVBoxLayout(grp_save)
+
+        self.chk_save_states = QCheckBox("Save Depth State (0–20)")
+        self.chk_save_states.setChecked(True)
+        lay_save.addWidget(self.chk_save_states)
+
+        self.chk_save_conditions = QCheckBox("Save Clinical Classes (ok, shallow, ...)")
+        self.chk_save_conditions.setChecked(True)
+        lay_save.addWidget(self.chk_save_conditions)
+
+        self.chk_save_events = QCheckBox("Save Entry Events (Shallow / BS)")
+        self.chk_save_events.setChecked(True)
+        lay_save.addWidget(self.chk_save_events)
+
+        self.chk_save_crop = QCheckBox("Save Crop Boundaries (Keep Start / End)")
+        self.chk_save_crop.setChecked(True)
+        lay_save.addWidget(self.chk_save_crop)
 
         self.btn_save = QPushButton("💾 Validate & Save Annotated Sample (.npz)")
         self.btn_save.setEnabled(False)
@@ -458,7 +487,7 @@ class EEGAnnotatorWindow(QMainWindow):
                 self._load_existing_annotated_file(file_path)
                 return
 
-            # Case 2: User selected a raw VitalDB case, check if sidecar *_annotated.npz exists
+            # Case 2: Check if sidecar *_annotated.npz exists next to raw file
             sidecar_annotated = AnnotationStore.get_default_annotated_path(file_path)
             if sidecar_annotated != file_path and AnnotationStore.is_annotated_npz(sidecar_annotated):
                 reply = QMessageBox.question(
@@ -472,16 +501,25 @@ class EEGAnnotatorWindow(QMainWindow):
                     QMessageBox.StandardButton.Yes,
                 )
                 if reply == QMessageBox.StandardButton.Yes:
-                    self._load_existing_annotated_file(sidecar_annotated)
+                    self._load_existing_annotated_file(sidecar_annotated, raw_fallback_path=file_path)
                     return
 
             # Case 3: Load fresh raw recording
             eeg, track_name = self.processor.extract_eeg_from_file(file_path)
+            hyp_tracks, detected_hyp = self.processor.extract_hypnotics_from_file(file_path)
+
             sample_id = os.path.splitext(os.path.basename(file_path))[0]
             if sample_id.endswith("_annotated"):
                 sample_id = sample_id[: -len("_annotated")]
 
-            self._ingest_raw_eeg(sample_id, eeg, source_path=file_path, track_name=track_name)
+            self._ingest_raw_eeg(
+                sample_id=sample_id,
+                eeg=eeg,
+                source_path=file_path,
+                track_name=track_name,
+                hypnotic_type=detected_hyp,
+                hypnotic_tracks=hyp_tracks,
+            )
 
         except Exception as e:
             QMessageBox.critical(self, "Error Loading File", f"Could not load recording:\n{e}")
@@ -493,7 +531,21 @@ class EEGAnnotatorWindow(QMainWindow):
         self.event_line_pairs.clear()
         self.list_events.clear()
 
-    def _ingest_raw_eeg(self, sample_id: str, eeg: np.ndarray, source_path: str, track_name: str):
+    def _reset_save_checkboxes(self, states=True, conditions=True, events=True, crop=True):
+        self.chk_save_states.setChecked(states)
+        self.chk_save_conditions.setChecked(conditions)
+        self.chk_save_events.setChecked(events)
+        self.chk_save_crop.setChecked(crop)
+
+    def _ingest_raw_eeg(
+        self,
+        sample_id: str,
+        eeg: np.ndarray,
+        source_path: str,
+        track_name: str,
+        hypnotic_type: str,
+        hypnotic_tracks: list,
+    ):
         self._clear_visual_events()
 
         freqs, t_spec, Sxx_db = self.processor.compute_spectrogram(eeg)
@@ -510,28 +562,51 @@ class EEGAnnotatorWindow(QMainWindow):
             initial_states=initial_states,
             source_path=source_path,
             eeg_track_name=track_name,
+            hypnotic_type=hypnotic_type,
+            hypnotic_tracks=hypnotic_tracks,
         )
 
+        self._reset_save_checkboxes(True, True, True, True)
         self._render_store_to_plots(freqs, t_spec, Sxx_db)
         self.lbl_file_status.setText(f"Status: New Raw Recording ({track_name})")
         self.lbl_file_status.setStyleSheet("color: #ce9178; font-weight: bold;")
         self.btn_save.setEnabled(True)
 
-    def _load_existing_annotated_file(self, annotated_path: str):
+    def _load_existing_annotated_file(self, annotated_path: str, raw_fallback_path: str = ""):
         self._clear_visual_events()
-        self.store.load_from_annotated_npz(annotated_path)
 
-        # Recompute spectrogram on the fly for visualization (never saved on disk)
+        hyp_tracks, detected_hyp = self.processor.extract_hypnotics_from_file(annotated_path)
+        if not hyp_tracks and raw_fallback_path:
+            hyp_tracks, detected_hyp = self.processor.extract_hypnotics_from_file(raw_fallback_path)
+
+        self.store.load_from_annotated_npz(
+            annotated_path,
+            fallback_initial_states_fn=self.processor.estimate_initial_state,
+            hypnotic_tracks=hyp_tracks,
+        )
+        if self.store.hypnotic_type == "unknown" and detected_hyp != "unknown":
+            self.store.hypnotic_type = detected_hyp
+
+        # Restore checkboxes to match what was previously saved
+        sec = self.store.loaded_sections
+        self._reset_save_checkboxes(
+            states=sec.get("states", True),
+            conditions=sec.get("conditions", True),
+            events=sec.get("events", True),
+            crop=sec.get("crop", True),
+        )
+
         freqs, t_spec, Sxx_db = self.processor.compute_spectrogram(self.store.eeg_data)
         self._render_store_to_plots(freqs, t_spec, Sxx_db)
 
-        # Recreate visual event lines from restored store.events
         for ev in self.store.events:
             self._spawn_event_line_pair(ev.time, ev.event_type)
         self._refresh_event_list()
 
+        saved_names = [k for k, v in sec.items() if v]
         self.lbl_file_status.setText(
-            f"Status: Resumed Existing Annotations ({os.path.basename(annotated_path)})"
+            f"Status: Resumed ({os.path.basename(annotated_path)})\n"
+            f"Previously saved: {', '.join(saved_names) if saved_names else 'none'}"
         )
         self.lbl_file_status.setStyleSheet("color: #4fc1ff; font-weight: bold;")
         self.btn_save.setEnabled(True)
@@ -539,14 +614,30 @@ class EEGAnnotatorWindow(QMainWindow):
     def _render_store_to_plots(self, freqs: np.ndarray, t_spec: np.ndarray, Sxx_db: np.ndarray):
         self.time_eeg = np.arange(len(self.store.eeg_data)) / float(self.processor.fs)
         self.lbl_sample_id.setText(f"Sample ID: {self.store.sample_id}")
+        self.lbl_hypnotic_agent.setText(f"Hypnotic Agent (auto): {self.store.hypnotic_type}")
 
+        # Plot 0: Hypnotic Concentration (0 to 8)
+        self.p_hyp.clear()
+        self.p_hyp.setYRange(0, 8, padding=0.05)
+        if self.store.hypnotic_tracks:
+            palette = ["#4fc1ff", "#ff9d00", "#89d185", "#f48771"]
+            for i, trk in enumerate(self.store.hypnotic_tracks):
+                pen = pg.mkPen(palette[i % len(palette)], width=2)
+                self.p_hyp.plot(trk["time"], trk["val"], pen=pen, name=trk["name"])
+            self.p_hyp.setTitle(f"Hypnotic Concentration (0–8) — Agent: {self.store.hypnotic_type}")
+        else:
+            self.p_hyp.setTitle("Hypnotic Concentration (0–8) — No concentration track found (unknown)")
+
+        # Plot 1: Raw EEG
         self.curve_eeg.setData(self.time_eeg, self.store.eeg_data)
 
+        # Plot 2: Spectrogram
         self.img_spec.setImage(Sxx_db.T, autoLevels=True)
         dt = t_spec[1] - t_spec[0] if len(t_spec) > 1 else 1.0
         df = freqs[1] - freqs[0] if len(freqs) > 1 else 1.0
         self.img_spec.setRect(t_spec[0], freqs[0], len(t_spec) * dt, len(freqs) * df)
 
+        # Plots 3, 4, 5
         self.curve_power.setData(self.store.t_windows, self.store.powers)
         self.p_state.set_series(self.store.t_windows, self.store.states)
         self.p_cond.set_series(self.store.t_windows, self.store.conditions)
@@ -688,31 +779,54 @@ class EEGAnnotatorWindow(QMainWindow):
         self._refresh_event_list()
 
     # =================================================================
-    # MANUAL SAVING
+    # DIRECT SIDE-BY-SIDE SELECTIVE MANUAL SAVING
     # =================================================================
     def _save_annotations(self):
-        default_path = AnnotationStore.get_default_annotated_path(self.store.source_path)
-
-        save_path, _ = QFileDialog.getSaveFileName(
-            self, "Save Annotated EEG Dataset", default_path, "Compressed NumPy Archive (*.npz)"
-        )
-        if not save_path:
+        if not self.store.source_path:
+            QMessageBox.warning(
+                self, "No Source File", "No recording path is associated with the current session."
+            )
             return
 
+        save_states = self.chk_save_states.isChecked()
+        save_conditions = self.chk_save_conditions.isChecked()
+        save_events = self.chk_save_events.isChecked()
+        save_crop = self.chk_save_crop.isChecked()
+
+        if not any([save_states, save_conditions, save_events, save_crop]):
+            QMessageBox.warning(
+                self,
+                "Nothing Selected to Save",
+                "Please check at least one annotation section (States, Classes, Events, or Crop) before saving.",
+            )
+            return
+
+        save_path = AnnotationStore.get_default_annotated_path(self.store.source_path)
+
         try:
-            summary = self.store.save_annotated_npz(save_path)
+            summary = self.store.save_annotated_npz(
+                save_path,
+                save_states=save_states,
+                save_conditions=save_conditions,
+                save_events=save_events,
+                save_crop=save_crop,
+            )
             self.store.source_path = save_path
+            saved_list = [k for k, v in summary["saved_sections"].items() if v]
+
             self.lbl_file_status.setText(
-                f"Status: Saved ({os.path.basename(save_path)})"
+                f"Status: Saved ({os.path.basename(save_path)})\n"
+                f"Saved sections: {', '.join(saved_list)}"
             )
             self.lbl_file_status.setStyleSheet("color: #4ec9b0; font-weight: bold;")
 
             QMessageBox.information(
                 self,
                 "Saved Successfully",
-                f"Saved annotated dataset to:\n{save_path}\n\n"
+                f"Saved annotated dataset alongside original recording:\n{save_path}\n\n"
                 f"• Sample ID: {self.store.sample_id}\n"
-                f"• Valid Crop Window: {self.store.keep_start_sec:.1f}s — {self.store.keep_end_sec:.1f}s\n"
+                f"• Hypnotic Agent: {self.store.hypnotic_type}\n"
+                f"• Saved Sections: {', '.join(saved_list)}\n"
                 f"• Kept Duration: {summary['kept_duration_sec']:.1f}s ({summary['kept_samples']} samples)\n"
                 f"• Valid Labeled Windows: {summary['kept_windows']}\n"
                 f"• Events Inside Crop: {summary['kept_events']}",
