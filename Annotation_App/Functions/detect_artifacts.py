@@ -10,17 +10,17 @@ see if sliding mean on abs value of the signal can be good for detection
 import numpy as np
 import pywt         # https://pywavelets.readthedocs.io/en/latest/ref/wavelets.html for list of wavelet family name
 
-from Functions.ecdf import ecdf
+from Annotation_App.Functions.ecdf import ecdf
 from scipy import stats
-from Functions.filter import filter_butterworth
+from Annotation_App.Functions.filter import filter_butterworth
 import scipy as sc
-from Functions.utils import detect_pos_1
+from Annotation_App.Functions.utils import detect_pos_1
 from pybaselines import Baseline
-import Functions.time_frequency as tf
-from Functions.utils import diff_envelops
+import Annotation_App.Functions.time_frequency as tf
+from Annotation_App.Functions.utils import diff_envelops
 #from sklearn.neighbors import LocalOutlierFactor
 from Functions.detect_burst import get_burst
-from Functions.utils import resize_binary_mask
+from Annotation_App.Functions.utils import resize_binary_mask
 from scipy.signal import find_peaks, peak_prominences
 
 def correct_peaks(y, fs, f_cut, threshold):

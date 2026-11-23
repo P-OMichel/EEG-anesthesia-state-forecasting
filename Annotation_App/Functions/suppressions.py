@@ -1,7 +1,7 @@
 import numpy as np
 import scipy as sc
-from Functions.filter import filter_butterworth
-from Functions.utils import detect_pos_1, diff_envelops, envelope_maxima
+from Annotation_App.Functions.filter import filter_butterworth
+from Annotation_App.Functions.utils import detect_pos_1, diff_envelops, envelope_maxima
 
 #-----------------------------------------------------------------------------------#
 #----------------------------- Morphological routines ------------------------------#
@@ -725,7 +725,7 @@ def supp_edge_frequency_prominence(edge_frequencies, fs):
 #----------------------------------- mask suppressions envelopes -------------------------------#
 #-----------------------------------------------------------------------------------------------#
 
-from Functions.filter import get_filtered_signal
+from Annotation_App.Functions.filter import get_filtered_signal
 from scipy.interpolate import interp1d
 from scipy.ndimage import uniform_filter1d
 

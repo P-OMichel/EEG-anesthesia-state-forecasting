@@ -10,7 +10,7 @@
 
 import numpy as np
 import pywt
-from Functions.ecdf import *
+from Annotation_App.Functions.ecdf import *
 
 #WQN with ecdf
 #WQN_2 Matteo's method and percentage for selected ref and art coefficients parts

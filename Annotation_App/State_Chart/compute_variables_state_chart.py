@@ -1,13 +1,13 @@
 import numpy as np
 import scipy as sc
-from Functions.filter import get_filtered_signal, filter_butterworth
-from Functions.detect_artifacts import find_artifacts, get_artifacts_and_gc
-from Functions.WaveletQuantileNormalization import WQN_3
-from Functions.main_freq import get_main_frequency_zcr
-from Functions.utils import get_quantile
-from Functions.time_frequency import spectrogram
-from Functions.edge_frequency import edge_frequencies_limit_value, edge_frequencies_significant_value
-from Functions.suppressions import detect_supp_edge_frequency
+from Annotation_App.Functions.filter import get_filtered_signal, filter_butterworth
+from Annotation_App.Functions.detect_artifacts import find_artifacts, get_artifacts_and_gc
+from Annotation_App.Functions.WaveletQuantileNormalization import WQN_3
+from Annotation_App.Functions.main_freq import get_main_frequency_zcr
+from Annotation_App.Functions.utils import get_quantile
+from Annotation_App.Functions.time_frequency import spectrogram
+from Annotation_App.Functions.edge_frequency import edge_frequencies_limit_value, edge_frequencies_significant_value
+from Annotation_App.Functions.suppressions import detect_supp_edge_frequency
 
 class ComputeVariables:
 
