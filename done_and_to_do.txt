@@ -1,0 +1,30 @@
+11/23/2028:
+
+
+Done:
+- App with display of:
+    - Hypnotic concentration if known
+    - EEG
+    - Spectrogram
+    - state using power as dummy (high power high state and vice versa but not actual EEG state)
+    - state editable plot
+    - classes (awake, shallow, ok, heavy, too heavy) editable plot
+
+Fonctionnalities:
+- Selection of editable points to update on state and classes plots
+- Adding event markers (shallow entry or BS entry) for EEG and spectrogram plots
+- Saving of desired edited data
+- reloading of already annotated data
+
+
+--------------------------------------------------------------------------------------------
+To do:
+- Spectrogram computed using handmade parameters. 
+- Display with jet colormap
+- compute actual state instead of dummy power.
+- allow view to change between state and features (power proportions, suppresions amount, etc...)
+- add artifact to classes
+- add 21 state with 21 being too many artifacts to determined actual state.
+
+
+========================================================================================================================================================================================
