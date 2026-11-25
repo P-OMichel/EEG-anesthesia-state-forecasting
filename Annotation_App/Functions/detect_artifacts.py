@@ -19,7 +19,7 @@ from pybaselines import Baseline
 import Annotation_App.Functions.time_frequency as tf
 from Annotation_App.Functions.utils import diff_envelops
 #from sklearn.neighbors import LocalOutlierFactor
-from Functions.detect_burst import get_burst
+from Annotation_App.Functions.detect_burst import get_burst
 from Annotation_App.Functions.utils import resize_binary_mask
 from scipy.signal import find_peaks, peak_prominences
 

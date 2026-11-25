@@ -387,7 +387,7 @@ def clean_mask_fast(mask: np.ndarray, min_gap: int, min_segment: int) -> np.ndar
 
 
 def _fill_gaps(mask: np.ndarray, min_gap: int) -> np.ndarray:
-    print(len(mask))
+    #print(len(mask))
 
     # Find starts and ends of 0-segments
     padded = np.pad(mask, 1, constant_values=1)  # pad with 1s so edges are not gaps

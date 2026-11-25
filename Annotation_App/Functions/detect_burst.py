@@ -3,7 +3,7 @@ Function to detect burst between suppressions
 '''
 import numpy as np
 import scipy as sc
-from Functions.utils import filter_binary_mask, remove_short_segments
+from Annotation_App.Functions.utils import filter_binary_mask, remove_short_segments
 
 def get_burst(edge_frequency, delta_t):
 

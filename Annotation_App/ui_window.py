@@ -3,7 +3,8 @@ import numpy as np
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QFileDialog, QGroupBox, QCheckBox,
-    QMessageBox, QSplitter, QListWidget, QGraphicsRectItem
+    QMessageBox, QSplitter, QListWidget, QGraphicsRectItem,
+    QButtonGroup
 )
 from PyQt6.QtCore import Qt, QRectF, pyqtSignal
 from PyQt6.QtGui import QPen, QBrush, QColor
@@ -227,6 +228,11 @@ class EEGAnnotatorWindow(QMainWindow):
         self.time_eeg: np.ndarray = np.array([])
         self.event_line_pairs = []
 
+        # Fixed reference plot data & current view mode
+        self.fixed_initial_states: np.ndarray = np.array([], dtype=np.int32)
+        self.window_features: dict[str, np.ndarray] = {}
+        self.fixed_view_mode: str = "state"  # 'state' | 'proportions' | 'suppression' | 'ratios' | 'freq'
+
         self._setup_ui()
 
     def _setup_ui(self):
@@ -302,17 +308,79 @@ class EEGAnnotatorWindow(QMainWindow):
         self.p_spec.setLabel("left", "Frequency", units="Hz")
         self.img_spec = pg.ImageItem()
         self.p_spec.addItem(self.img_spec)
-        self.img_spec.setColorMap(pg.colormap.get("viridis"))
-        plots_layout.addWidget(self.p_spec, stretch=2)
 
-        # Plot 3: Sliding Window Power
-        self.p_power = pg.PlotWidget(title="3. Sliding Window Power (30s window, 10s step)")
-        self.p_power.setLabel("left", "Power", units="µV²")
-        self.p_power.showGrid(x=True, y=True, alpha=0.3)
-        self.curve_power = self.p_power.plot(
-            pen=pg.mkPen("#ce9178", width=2), symbol="o", symbolSize=5, symbolBrush="#ce9178"
-        )
-        plots_layout.addWidget(self.p_power, stretch=2)
+        # Jet-like colormap (dark blue -> blue -> cyan -> yellow -> red -> dark red)
+        jet_positions = [0.0, 0.125, 0.375, 0.625, 0.875, 1.0]
+        jet_colors = [
+            (0, 0, 128, 255),     # Dark blue
+            (0, 0, 255, 255),     # Blue
+            (0, 255, 255, 255),   # Cyan
+            (255, 255, 0, 255),   # Yellow
+            (255, 0, 0, 255),     # Red
+            (128, 0, 0, 255),     # Dark red
+        ]
+        jet_cmap = pg.ColorMap(pos=jet_positions, color=jet_colors)
+        self.img_spec.setColorMap(jet_cmap)
+        plots_layout.addWidget(self.p_spec, stretch=2)      
+
+        # View Switcher Bar for Plot 3 (Fixed Reference Plot)
+        view_bar = QHBoxLayout()
+        view_bar.setContentsMargins(4, 2, 4, 0)
+        view_bar.setSpacing(6)
+
+        lbl_view = QLabel("3. Reference View:")
+        lbl_view.setStyleSheet("font-weight: bold; color: #ce9178;")
+        view_bar.addWidget(lbl_view)
+
+        self.fixed_view_group = QButtonGroup(self)
+        self.fixed_view_group.setExclusive(True)
+
+        view_buttons = [
+            ("state", "Estimated State (0–20)"),
+            ("proportions", "Power Proportions"),
+            ("suppression", "Suppression Ratios"),
+            ("ratios", "Band Ratios"),
+            ("freq", "q_0_85 & f_central"),
+        ]
+
+        btn_style = """
+            QPushButton {
+                background-color: #2d2d30;
+                color: #cccccc;
+                border: 1px solid #3e3e42;
+                padding: 3px 10px;
+                border-radius: 3px;
+            }
+            QPushButton:checked {
+                background-color: #ce9178;
+                color: #1e1e1e;
+                font-weight: bold;
+                border: 1px solid #ce9178;
+            }
+            QPushButton:hover:!checked {
+                background-color: #3e3e42;
+            }
+        """
+
+        for mode_key, label_text in view_buttons:
+            btn = QPushButton(label_text)
+            btn.setCheckable(True)
+            btn.setStyleSheet(btn_style)
+            if mode_key == "state":
+                btn.setChecked(True)
+            btn.clicked.connect(lambda checked, m=mode_key: self._set_fixed_plot_view(m))
+            self.fixed_view_group.addButton(btn)
+            view_bar.addWidget(btn)
+
+        view_bar.addStretch()
+        plots_layout.addLayout(view_bar)
+
+        # Plot 3: Fixed Reference Plot (Initial State or Computed Features)
+        self.p_fixed = pg.PlotWidget(title="3. Fixed Reference: Estimated State (30s window, 10s step)")
+        self.p_fixed.setLabel("left", "State", units="0-20")
+        self.p_fixed.showGrid(x=True, y=True, alpha=0.3)
+        self.fixed_legend = self.p_fixed.addLegend(offset=(10, 5))
+        plots_layout.addWidget(self.p_fixed, stretch=2)
 
         # Plot 4: Interactive Drag-and-Drop State (0..20)
         self.p_state = InteractiveAnnotationPlot(
@@ -320,7 +388,7 @@ class EEGAnnotatorWindow(QMainWindow):
             y_max=20,
             line_color="#569cd6",
             default_brush="#569cd6",
-            title="4. Depth State (0–20) — Drag Points | Shift+Box Select | Ctrl+Shift+Box Deselect",
+            title="4. Editable Depth State (0–20) — Drag Points | Shift+Box Select | Ctrl+Shift+Box Deselect",
         )
         self.p_state.setLabel("left", "State", units="0-20")
         self.p_state.setYRange(-1, 21)
@@ -346,7 +414,7 @@ class EEGAnnotatorWindow(QMainWindow):
         plots_layout.addWidget(self.p_cond, stretch=2)
 
         # Synchronize X-axes across all 6 plots
-        for plot in [self.p_hyp, self.p_spec, self.p_power, self.p_state, self.p_cond]:
+        for plot in [self.p_hyp, self.p_spec, self.p_fixed, self.p_state, self.p_cond]:
             plot.setXLink(self.p_eeg)
 
         # -------------------------------------------------------------
@@ -469,6 +537,124 @@ class EEGAnnotatorWindow(QMainWindow):
         ctrl_layout.addStretch()
 
     # =================================================================
+    # FIXED REFERENCE PLOT VIEW SWITCHING
+    # =================================================================
+    def _set_fixed_plot_view(self, mode: str):
+        self.fixed_view_mode = mode
+        self._update_fixed_plot()
+
+    def _update_fixed_plot(self):
+        self.p_fixed.clear()
+        if self.fixed_legend is not None:
+            self.fixed_legend.clear()
+
+        t = self.store.t_windows
+        if len(t) == 0:
+            return
+
+        mode = self.fixed_view_mode
+
+        if mode == "state":
+            self.p_fixed.setTitle("3. Fixed Reference: Estimated Depth State (0–20)")
+            self.p_fixed.setLabel("left", "State", units="0-20")
+            self.p_fixed.enableAutoRange(axis="y", enable=False)
+            self.p_fixed.setYRange(-1, 21)
+            self.p_fixed.plot(
+                t,
+                self.fixed_initial_states,
+                pen=pg.mkPen("#ce9178", width=2),
+                symbol="o",
+                symbolSize=5,
+                symbolBrush="#ce9178",
+                name="Estimated State",
+            )
+
+        elif mode == "proportions":
+            self.p_fixed.setTitle("3. Reference Features: Band Power Proportions")
+            self.p_fixed.setLabel("left", "Proportion")
+            self.p_fixed.enableAutoRange(axis="y", enable=False)
+            self.p_fixed.setYRange(-0.05, 1.05)
+
+            series_cfg = [
+                ("prop_delta", "Delta (0.5–4 Hz)", "#4fc1ff"),
+                ("prop_alpha", "Alpha (7–15 Hz)", "#89d185"),
+                ("prop_beta", "Beta (15–30 Hz)", "#ffd700"),
+                ("prop_gamma", "Gamma (30–45 Hz)", "#f48771"),
+            ]
+            for key, label, color in series_cfg:
+                if key in self.window_features:
+                    self.p_fixed.plot(
+                        t,
+                        self.window_features[key],
+                        pen=pg.mkPen(color, width=2),
+                        name=label,
+                    )
+
+        elif mode == "suppression":
+            self.p_fixed.setTitle("3. Reference Features: Suppression Ratios")
+            self.p_fixed.setLabel("left", "Ratio")
+            self.p_fixed.enableAutoRange(axis="y", enable=True)
+
+            series_cfg = [
+                ("ies_prop", "IES Proportion", "#da70d6"),
+                ("alpha_supp_prop", "Alpha Suppression Prop.", "#4ec9b0"),
+            ]
+            for key, label, color in series_cfg:
+                if key in self.window_features:
+                    self.p_fixed.plot(
+                        t,
+                        self.window_features[key],
+                        pen=pg.mkPen(color, width=2),
+                        symbol="o",
+                        symbolSize=4,
+                        symbolBrush=color,
+                        name=label,
+                    )
+
+        elif mode == "ratios":
+            self.p_fixed.setTitle("3. Reference Features: Spectral Power Ratios")
+            self.p_fixed.setLabel("left", "Ratio")
+            self.p_fixed.enableAutoRange(axis="y", enable=True)
+
+            series_cfg = [
+                ("r_alpha_delta", "Alpha / Delta", "#4fc1ff"),
+                ("r_beta_delta", "Beta / Delta", "#89d185"),
+                ("r_gamma_delta", "Gamma / Delta", "#ffd700"),
+                ("r_beta_alpha", "Beta / Alpha", "#f48771"),
+                ("r_gamma_alpha", "Gamma / Alpha", "#da70d6"),
+                ("r_gamma_beta", "Gamma / Beta", "#ce9178"),
+            ]
+            for key, label, color in series_cfg:
+                if key in self.window_features:
+                    self.p_fixed.plot(
+                        t,
+                        self.window_features[key],
+                        pen=pg.mkPen(color, width=1.8),
+                        name=label,
+                    )
+
+        elif mode == "freq":
+            self.p_fixed.setTitle("3. Reference Features: Spectral Edge (q_0_85) & Central Frequency (f_central)")
+            self.p_fixed.setLabel("left", "Frequency", units="Hz")
+            self.p_fixed.enableAutoRange(axis="y", enable=True)
+
+            series_cfg = [
+                ("q_0_85", "q_0_85 (SEF85)", "#ff9d00"),
+                ("f_central", "f_central (ZCR)", "#4ec9b0"),
+            ]
+            for key, label, color in series_cfg:
+                if key in self.window_features:
+                    self.p_fixed.plot(
+                        t,
+                        self.window_features[key],
+                        pen=pg.mkPen(color, width=2),
+                        symbol="o",
+                        symbolSize=4,
+                        symbolBrush=color,
+                        name=label,
+                    )
+
+    # =================================================================
     # REAL FILE LOADING & EXISTING ANNOTATION DETECTION
     # =================================================================
     def _open_recording_file(self):
@@ -549,16 +735,18 @@ class EEGAnnotatorWindow(QMainWindow):
         self._clear_visual_events()
 
         freqs, t_spec, Sxx_db = self.processor.compute_spectrogram(eeg)
-        t_windows, powers = self.processor.compute_sliding_power(
+        t_windows, initial_states, features = self.processor.compute_sliding_states(
             eeg, win_sec=self.store.win_sec, step_sec=self.store.step_sec
         )
-        initial_states = self.processor.estimate_initial_state(powers)
+
+        self.fixed_initial_states = initial_states.copy()
+        self.window_features = features
 
         self.store.initialize_record(
             sample_id=sample_id,
             eeg_data=eeg,
             t_windows=t_windows,
-            powers=powers,
+            powers=np.zeros(len(t_windows), dtype=np.float32),
             initial_states=initial_states,
             source_path=source_path,
             eeg_track_name=track_name,
@@ -581,11 +769,22 @@ class EEGAnnotatorWindow(QMainWindow):
 
         self.store.load_from_annotated_npz(
             annotated_path,
-            fallback_initial_states_fn=self.processor.estimate_initial_state,
+            fallback_initial_states_fn=lambda arr: np.zeros(len(arr), dtype=np.int32),
             hypnotic_tracks=hyp_tracks,
         )
         if self.store.hypnotic_type == "unknown" and detected_hyp != "unknown":
             self.store.hypnotic_type = detected_hyp
+
+        # Recompute initial estimated states & window features for Plot 3 reference views
+        try:
+            _, est_states, features = self.processor.compute_sliding_states(
+                self.store.eeg_data, win_sec=self.store.win_sec, step_sec=self.store.step_sec
+            )
+            self.fixed_initial_states = est_states
+            self.window_features = features
+        except Exception:
+            self.fixed_initial_states = self.store.states.copy()
+            self.window_features = {}
 
         # Restore checkboxes to match what was previously saved
         sec = self.store.loaded_sections
@@ -637,8 +836,10 @@ class EEGAnnotatorWindow(QMainWindow):
         df = freqs[1] - freqs[0] if len(freqs) > 1 else 1.0
         self.img_spec.setRect(t_spec[0], freqs[0], len(t_spec) * dt, len(freqs) * df)
 
-        # Plots 3, 4, 5
-        self.curve_power.setData(self.store.t_windows, self.store.powers)
+        # Plot 3: Fixed Reference Plot (State or Features depending on selected button)
+        self._update_fixed_plot()
+
+        # Plots 4 & 5: Editable Depth State & Clinical Condition
         self.p_state.set_series(self.store.t_windows, self.store.states)
         self.p_cond.set_series(self.store.t_windows, self.store.conditions)
 

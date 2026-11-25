@@ -140,7 +140,6 @@ def edge_frequencies_limit_value(M, f, min_val = 0.001, max_val=20, threshold=No
         else:
             threshold = T * np.quantile(np.clip(M, min_val, max_val), q)
         # min max values 
-        print('threshold', threshold)
         threshold = min(threshold_max, threshold)
         threshold = max(threshold_min, threshold)
 

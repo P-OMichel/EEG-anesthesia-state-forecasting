@@ -167,7 +167,7 @@ def WQN_3(y,index_mask,wavelet_name,mode,min_interval,alpha):
       
       # determine size of window to use given the min_interval
       size_art=index_mask[Nb_art+1]-index_mask[Nb_art]      # determine the size of the artifact
-      print(size_art)
+      #print(size_art)
       if size_art == 0:
          continue
       

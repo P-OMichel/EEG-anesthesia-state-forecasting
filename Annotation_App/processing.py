@@ -2,6 +2,10 @@ import os
 import numpy as np
 from scipy import signal
 
+# Update these two import paths to match your project structure
+from Annotation_App.State_Chart.compute_variables import ComputeVariables
+from Annotation_App.State_Chart.state_chart import EstimateState
+
 
 class EEGProcessor:
     """Handles VitalDB EEG & hypnotic extraction, spectral analysis, and state estimation."""
@@ -22,8 +26,27 @@ class EEGProcessor:
         "Solar8000__INSEVO": "Sevoflurane Insp (%)",
     }
 
+    FEATURE_KEYS = [
+        "prop_delta",
+        "prop_alpha",
+        "prop_beta",
+        "prop_gamma",
+        "ies_prop",
+        "alpha_supp_prop",
+        "r_alpha_delta",
+        "r_beta_delta",
+        "r_gamma_delta",
+        "r_beta_alpha",
+        "r_gamma_alpha",
+        "r_gamma_beta",
+        "q_0_85",
+        "f_central",
+    ]
+
     def __init__(self, fs: int = 128):
         self.fs = fs
+        self.var_extractor = ComputeVariables(fs=self.fs)
+        self.state_estimator = EstimateState()
 
     def extract_eeg_from_file(self, file_path: str) -> tuple[np.ndarray, str]:
         """
@@ -135,10 +158,68 @@ class EEGProcessor:
         Sxx_db = 10 * np.log10(Sxx[freq_mask, :] + 1e-12)
         return f, t_spec, Sxx_db
 
-    def compute_sliding_power(
+    def _estimate_window_state_and_features(self, segment: np.ndarray) -> tuple[int, dict]:
+        """Runs variable extraction and state estimation on a single EEG window."""
+        if np.all(segment == 0):
+            return 0, {k: 0.0 for k in self.FEATURE_KEYS}
+
+        cv = self.var_extractor
+        cv.clean_signal(segment)
+        cv.get_P_list()
+        cv.get_P_prop()
+        cv.get_P_ratios()
+        cv.get_f_main()
+        cv.get_f_quantiles()
+        cv.get_ef()
+        cv.get_supp()
+
+        feats = {
+            "prop_delta": float(cv.prop_delta),
+            "prop_alpha": float(cv.prop_alpha),
+            "prop_beta": float(cv.prop_beta),
+            "prop_gamma": float(cv.prop_gamma),
+            "ies_prop": float(cv.ies_prop),
+            "alpha_supp_prop": float(cv.alpha_supp_prop),
+            "r_alpha_delta": float(cv.r_alpha_delta),
+            "r_beta_delta": float(cv.r_beta_delta),
+            "r_gamma_delta": float(cv.r_gamma_delta),
+            "r_beta_alpha": float(cv.r_beta_alpha),
+            "r_gamma_alpha": float(cv.r_gamma_alpha),
+            "r_gamma_beta": float(cv.r_gamma_beta),
+            "q_0_85": float(cv.q_0_85),
+            "f_central": float(cv.f_central),
+        }
+
+        self.state_estimator.current_data(
+            prop_delta=cv.prop_delta,
+            prop_alpha=cv.prop_alpha,
+            prop_beta=cv.prop_beta,
+            prop_gamma=cv.prop_gamma,
+            r_alpha_delta=cv.r_alpha_delta,
+            r_beta_delta=cv.r_beta_delta,
+            r_gamma_delta=cv.r_gamma_delta,
+            r_beta_alpha=cv.r_beta_alpha,
+            r_gamma_alpha=cv.r_gamma_alpha,
+            r_gamma_beta=cv.r_gamma_beta,
+            q_0_85=cv.q_0_85,
+            f_central=cv.f_central,
+            ies_prop=cv.ies_prop,
+            alpha_supp_prop=cv.alpha_supp_prop,
+        )
+        self.state_estimator.get_main_state()
+        self.state_estimator.get_state()
+        state = int(self.state_estimator.state)
+
+        return state, feats
+
+    def compute_sliding_states(
         self, eeg: np.ndarray, win_sec: float = 30.0, step_sec: float = 10.0
-    ):
-        """Computes mean power over sliding windows of 30s taken every 10s."""
+    ) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+        """
+        Computes the integer state [0..20] and all intermediate features over sliding
+        windows of 30s taken every 10s.
+        Returns (t_windows, states, features_dict).
+        """
         win_samples = int(win_sec * self.fs)
         step_samples = int(step_sec * self.fs)
 
@@ -146,31 +227,16 @@ class EEGProcessor:
             raise ValueError("EEG recording is shorter than the 30s analysis window.")
 
         starts = np.arange(0, len(eeg) - win_samples + 1, step_samples)
+        n_win = len(starts)
         t_windows = (starts + win_samples / 2.0) / self.fs
-        powers = np.zeros(len(starts), dtype=np.float32)
+        states = np.zeros(n_win, dtype=np.int32)
+        features = {k: np.zeros(n_win, dtype=np.float32) for k in self.FEATURE_KEYS}
 
         for i, start in enumerate(starts):
             segment = eeg[start : start + win_samples]
-            powers[i] = np.mean(segment ** 2)
+            st, w_feats = self._estimate_window_state_and_features(segment)
+            states[i] = st
+            for k in self.FEATURE_KEYS:
+                features[k][i] = w_feats[k]
 
-        return t_windows, powers
-
-    def estimate_initial_state(self, powers: np.ndarray) -> np.ndarray:
-        """
-        PLACEHOLDER ALGORITHM: Maps power levels to integer states [0..20] in steps of 1.
-        High power -> 20, Low power -> 0.
-        Replace this method later with your custom algorithm.
-        """
-        valid_powers = powers[powers > 0]
-        if len(valid_powers) == 0:
-            return np.zeros(len(powers), dtype=np.int32)
-
-        p_low = np.percentile(valid_powers, 5)
-        p_high = np.percentile(valid_powers, 95)
-
-        if p_high <= p_low:
-            return np.full(len(powers), 10, dtype=np.int32)
-
-        normalized = (powers - p_low) / (p_high - p_low)
-        clipped = np.clip(normalized, 0.0, 1.0)
-        return np.round(clipped * 20.0).astype(np.int32)
+        return t_windows, states, features

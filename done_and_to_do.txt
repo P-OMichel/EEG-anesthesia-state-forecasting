@@ -1,6 +1,5 @@
 11/23/2028:
 
-
 Done:
 - App with display of:
     - Hypnotic concentration if known
@@ -28,3 +27,13 @@ To do:
 
 
 ========================================================================================================================================================================================
+11/25/2028:
+
+Done:
+- Compute actual state (without DL routine for faster computation):
+- Display original state curve and updatable one
+- Posssibility to display variables (power proportions, power ratios, etc...) by changing the state curve view
+
+--------------------------------------------------------------------------------------------
+To do:
+- cancel action shortcut
