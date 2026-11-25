@@ -37,3 +37,4 @@ Done:
 --------------------------------------------------------------------------------------------
 To do:
 - cancel action shortcut
+- loading bar when charging and computing on sample
